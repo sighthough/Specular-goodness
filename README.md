@@ -6,4 +6,4 @@ mix the colour of the texture with the colour of the light to look snazzy as hec
 shadows are calculated in their own way too
 feel free to rip anything you want from the index file
 
-tech demo : 
+tech demo : [here](https://sighthough.github.io/Specular-goodness/)
