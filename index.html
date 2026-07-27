@@ -151,8 +151,8 @@
 <body>
 
   <header>
-    <h1>Custom Shader <span class="badge">Screen-Blend Purple Fix</span></h1>
-    <div style="font-size: 0.85rem; color: #8b949e;">Click & Drag Viewports to Orbit Camera</div>
+    <h1>Custom Shader <span class="badge">Angle-Based Specular Blend</span></h1>
+    <div style="font-size: 0.85rem; color: #8b949e;">Click & Drag Viewports to Rotate 3D Object</div>
   </header>
 
   <div class="container">
@@ -169,7 +169,7 @@
         </div>
       </div>
 
-      <!-- Shader Contrast (Mapped 0.5 to 5.5) -->
+      <!-- Shader Contrast -->
       <div class="control-group">
         <label>Shader Contrast</label>
         <div class="slider-container">
@@ -185,6 +185,15 @@
           <input type="range" id="shine-slider" min="8" max="128" step="4" value="64" oninput="updateShininess(this.value)">
           <span id="shine-val" class="slider-val">64</span>
         </div>
+      </div>
+
+      <!-- Light Movement Behavior -->
+      <div class="control-group">
+        <label>Light Behavior</label>
+        <select id="light-mode-select" onchange="changeLightMode(this.value)">
+          <option value="world">Stationary in World (Object Rotates Under Light)</option>
+          <option value="object">Lock to Object (Rotates With Object)</option>
+        </select>
       </div>
 
       <!-- Surface Map & Geometry Selectors -->
@@ -226,23 +235,23 @@
       <div class="viewport-card">
         <div class="card-header">
           <span class="card-title">Standard Phong Material</span>
-          <span style="font-size: 0.75rem; color: #8b949e;">Three.js Built-in Shader</span>
+          <span style="font-size: 0.75rem; color: #8b949e;">Three.js Native MeshPhongMaterial</span>
         </div>
         <div class="canvas-container" id="canvas-standard"></div>
         <div class="info-box">
-          <strong>Standard Phong:</strong> Static specular reflections that remain uniform light color.
+          <strong>Standard Phong:</strong> Native Three.js Phong specular reflections with standard light interaction and specular tinting.
         </div>
       </div>
 
       <!-- Specular Angle-Blend Shader Viewport -->
       <div class="viewport-card">
         <div class="card-header">
-          <span class="card-title" style="color: #a371f7;">True Tinted Specular Shift</span>
-          <span style="font-size: 0.75rem; color: #8957e5;">Screen-Blend Color Mixing</span>
+          <span class="card-title" style="color: #a371f7;">Angle-Faded Light Specular</span>
+          <span style="font-size: 0.75rem; color: #8957e5;">Incident Angle Blend</span>
         </div>
         <div class="canvas-container" id="canvas-custom"></div>
         <div class="info-box">
-          <strong>Specular Angle Shader:</strong> Direct viewing uses a screen blend (Red light + Blue texture = Purple shine). Grazing angles shift dynamically to the pure light color.
+          <strong>Specular Angle Shader:</strong> Direct light angles (0°–45°) allow the surface texture color to tint the highlight. Glancing angles (45°–90°) smoothly fade into the pure light color.
         </div>
       </div>
 
@@ -264,7 +273,6 @@
       const size = 64;
       for (let y = 0; y < 512; y += size) {
         for (let x = 0; x < 512; x += size) {
-          // Deep blue and off-white
           ctx1.fillStyle = ((x / size + y / size) % 2 === 0) ? '#283593' : '#e8eaf6';
           ctx1.fillRect(x, y, size, size);
         }
@@ -330,10 +338,6 @@
         if (!gl_FrontFacing) N = -N;
 
         vec3 V = normalize(uCameraPosition - vWorldPosition);
-        
-        // Smooth camera angle edge mapping for Fresnel
-        float dotNV = clamp(dot(N, V), 0.0, 1.0);
-        float cameraFresnel = pow(1.0 - smoothstep(0.0, 1.0, dotNV), 2.0);
 
         vec3 texColor = texture2D(uMap, vUv).rgb;
         
@@ -358,27 +362,26 @@
           accumulatedDiffuse += texColor * uLightColors[i] * dotNL * falloff * atten;
 
           // ==========================================
-          // TRUE PURPLE SPECULAR COLOR BLEND
+          // INCIDENT LIGHT ANGLE SPECULAR BLEND
           // ==========================================
           
-          // 1. SCREEN BLEND: Adds colors vibrantly. Red (1,0,0) + Blue (0,0,1) = Purple (1,0,1).
-          // This stops the colors from absorbing each other like they do with standard multiplication.
+          // 1. SCREEN BLEND: Merges light + texture color (Texture shows strongly)
           vec3 tintedSpecColor = texColor + uLightColors[i] - (texColor * uLightColors[i]);
           
-          // 2. PURE COLOR: Used for grazing/edge angles
+          // 2. PURE COLOR: Unaltered light color
           vec3 pureSpecColor = uLightColors[i];
 
-          // 3. MIX: Driven *only* by the camera viewing angle (cameraFresnel), 
-          // so the center of the highlight isn't forced back to red.
-          float colorShift = smoothstep(0.1, 0.8, cameraFresnel);
-          vec3 finalSpecColor = mix(tintedSpecColor, pureSpecColor, colorShift);
+          // 3. ANGLE-BASED MIXING:
+          // 0° to 45° (dotNL 1.0 to 0.7071) -> Screen blend / tinted texture color
+          // 45° to 90° (dotNL 0.7071 to 0.0) -> Fades into pure light color
+          float lightAngleFactor = smoothstep(0.7071, 0.0, dotNL);
+          vec3 finalSpecColor = mix(tintedSpecColor, pureSpecColor, lightAngleFactor);
 
           // Specular glint calculation
           vec3 H = normalize(L + V);
           float spec = pow(max(0.0, dot(N, H)), uShininess);
           float frontMask = smoothstep(0.0, 0.15, dotNL);
           
-          // Boost the specular slightly to ensure the tint pops over the diffuse
           totalSpecular += finalSpecColor * spec * uKs * atten * frontMask * 1.5;
         }
 
@@ -390,6 +393,7 @@
     // --- RENDER ENGINE SETUP ---
     let sceneStd, sceneCust, camera, rendererStd, rendererCust;
     let meshStd, meshCust;
+    let ambientLightStd;
     let textures;
     let currentTextureKey = 'checker';
     let lights = [];
@@ -398,14 +402,14 @@
     let shadowBase = 0.05;
     let currentContrast = 1.0;
     let currentShininess = 64.0; 
-    let currentKs = 1.20;
+    let currentKs = 1.0; // Standardized specular color coefficient
+    let lightMode = 'world'; // 'world' = stationary in 3D space, 'object' = rotates with mesh
 
-    // --- ORBIT CAMERA STATE ---
+    // --- OBJECT ROTATION STATE ---
     let isDragging = false;
     let previousMousePosition = { x: 0, y: 0 };
-    let cameraAngleX = 0;
-    let cameraAngleY = 0;
-    const cameraRadius = 7;
+    let targetRotationX = 0;
+    let targetRotationY = 0;
 
     const lightConfigs = {
       '1light': [
@@ -433,10 +437,15 @@
       const containerCust = document.getElementById('canvas-custom');
 
       camera = new THREE.PerspectiveCamera(45, containerStd.clientWidth / containerStd.clientHeight, 0.1, 100);
-      updateCameraPosition();
+      camera.position.set(0, 0, 7);
+      camera.lookAt(0, 0, 0);
 
       sceneStd = new THREE.Scene();
       sceneCust = new THREE.Scene();
+
+      // Standard Ambient light matching shadowBase baseline
+      ambientLightStd = new THREE.AmbientLight(0xffffff, shadowBase);
+      sceneStd.add(ambientLightStd);
 
       rendererStd = new THREE.WebGLRenderer({ antialias: true });
       rendererStd.setSize(containerStd.clientWidth, containerStd.clientHeight);
@@ -468,23 +477,39 @@
         const deltaX = e.clientX - previousMousePosition.x;
         const deltaY = e.clientY - previousMousePosition.y;
 
-        cameraAngleX -= deltaX * 0.008;
-        cameraAngleY += deltaY * 0.008;
+        targetRotationY += deltaX * 0.008;
+        targetRotationX += deltaY * 0.008;
 
-        cameraAngleY = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraAngleY));
+        targetRotationX = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, targetRotationX));
 
-        updateCameraPosition();
+        updateMeshRotation();
         previousMousePosition = { x: e.clientX, y: e.clientY };
       });
 
       window.addEventListener('mouseup', () => { isDragging = false; });
     }
 
-    function updateCameraPosition() {
-      camera.position.x = cameraRadius * Math.sin(cameraAngleX) * Math.cos(cameraAngleY);
-      camera.position.y = cameraRadius * Math.sin(cameraAngleY);
-      camera.position.z = cameraRadius * Math.cos(cameraAngleX) * Math.cos(cameraAngleY);
-      camera.lookAt(0, 0, 0);
+    function updateMeshRotation() {
+      if (meshStd) {
+        meshStd.rotation.x = targetRotationX;
+        meshStd.rotation.y = targetRotationY;
+      }
+      if (meshCust) {
+        meshCust.rotation.x = targetRotationX;
+        meshCust.rotation.y = targetRotationY;
+      }
+      updateLightUniforms();
+    }
+
+    function getEffectiveLightPosition(basePos) {
+      if (lightMode === 'world') {
+        return basePos.clone();
+      } else {
+        const pos = basePos.clone();
+        const euler = new THREE.Euler(targetRotationX, targetRotationY, 0, 'YXZ');
+        pos.applyEuler(euler);
+        return pos;
+      }
     }
 
     function createGeometry(type) {
@@ -499,13 +524,16 @@
       if (meshStd) sceneStd.remove(meshStd);
       if (meshCust) sceneCust.remove(meshCust);
 
+      // Standard Three.js Phong Material
       const matStd = new THREE.MeshPhongMaterial({
         map: textures[currentTextureKey],
         shininess: currentShininess,
-        specular: new THREE.Color(currentKs, currentKs, currentKs),
+        specular: new THREE.Color(0xffffff),
         side: THREE.DoubleSide
       });
       meshStd = new THREE.Mesh(geo, matStd);
+      meshStd.rotation.x = targetRotationX;
+      meshStd.rotation.y = targetRotationY;
       sceneStd.add(meshStd);
 
       const matCust = new THREE.ShaderMaterial({
@@ -526,6 +554,8 @@
         }
       });
       meshCust = new THREE.Mesh(geo, matCust);
+      meshCust.rotation.x = targetRotationX;
+      meshCust.rotation.y = targetRotationY;
       sceneCust.add(meshCust);
 
       updateLightUniforms();
@@ -539,6 +569,11 @@
       if (meshStd) meshStd.material.needsUpdate = true;
     }
 
+    function changeLightMode(mode) {
+      lightMode = mode;
+      updateLightUniforms();
+    }
+
     function setPreset(preset) {
       lights = lightConfigs[preset];
       document.querySelectorAll('.controls button').forEach(b => {
@@ -546,10 +581,9 @@
       });
       document.getElementById(`btn-${preset}`).classList.add('active');
 
-      sceneStd.children.filter(c => c.isLight).forEach(l => sceneStd.remove(l));
-      lights.forEach(l => {
-        const pLight = new THREE.PointLight(l.color, lightPower, 100);
-        pLight.position.copy(l.pos);
+      sceneStd.children.filter(c => c.isPointLight).forEach(l => sceneStd.remove(l));
+      lights.forEach(() => {
+        const pLight = new THREE.PointLight(0xffffff, lightPower, 100);
         sceneStd.add(pLight);
       });
 
@@ -559,7 +593,7 @@
     function updateLightPower(val) {
       lightPower = parseFloat(val);
       document.getElementById('power-val').innerText = lightPower.toFixed(2);
-      sceneStd.children.forEach(c => { if (c.isLight) c.intensity = lightPower; });
+      sceneStd.children.forEach(c => { if (c.isPointLight) c.intensity = lightPower; });
       if (meshCust) meshCust.material.uniforms.uLightPower.value = lightPower;
     }
 
@@ -578,11 +612,22 @@
 
     function updateLightUniforms() {
       if (!meshCust) return;
+
+      const stdLights = sceneStd.children.filter(c => c.isPointLight);
       const uniforms = meshCust.material.uniforms;
       uniforms.uNumLights.value = lights.length;
+
       for (let i = 0; i < 3; i++) {
         if (i < lights.length) {
-          uniforms.uLightPositions.value[i].copy(lights[i].pos);
+          const effPos = getEffectiveLightPosition(lights[i].pos);
+
+          if (stdLights[i]) {
+            stdLights[i].position.copy(effPos);
+            stdLights[i].color.copy(lights[i].color);
+            stdLights[i].intensity = lightPower;
+          }
+
+          uniforms.uLightPositions.value[i].copy(effPos);
           uniforms.uLightColors.value[i].copy(lights[i].color);
         }
       }
