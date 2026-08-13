@@ -9,4 +9,4 @@ the effecs is most notable when you lower the specular gloss value (shinyness)
 
 tech demo : [here](https://sighthough.github.io/Specular-goodness/)
 
-made by sighthough with alot of help from googles gemini 3.6 ai !
+made by [sighthough](https://youtu.be/UtPiUGwu-0Q) with alot of help from googles gemini 3.6 ai !
